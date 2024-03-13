@@ -1,11 +1,5 @@
 import fs from "fs/promises";
-import { exec } from "child_process";
-import AdmZip from "adm-zip";
-import { promisify } from "util";
-import { deleteUnzippedFiles } from "../utils/delete.js";
-import path from "path";
-
-const execAsync = promisify(exec);
+import { extractAndProcessZip } from "zipouter";
 
 export const upload = async (req, res) => {
   try {
@@ -16,89 +10,16 @@ export const upload = async (req, res) => {
         .status(400)
         .json({ success: false, error: "No file uploaded" });
     }
-
-    const zipFilePath = path.join(process.cwd(), req.file.originalname);
-    const unzipFolderPath = path.join(
-      process.cwd(),
-      req.file.originalname.replace(".zip", "")
-    );
-    const actualFilePath = req.file.originalname.replace(".zip", "");
-
-    await fs.writeFile(zipFilePath, req.file.buffer);
-
-    const zip = new AdmZip(zipFilePath);
-    zip.extractAllTo(unzipFolderPath, true);
-
-    const Files = await fs.readdir(path.join(unzipFolderPath, actualFilePath));
-    const compilationResults = [];
-
-    for (const File of Files) {
-      const FilePath = path.join(actualFilePath, actualFilePath, File);
-      if (File.endsWith(".js")) {
-        execAsync(`node ${FilePath}`).then(({ stdout, stderr }) => {
-          if (stderr) {
-            compilationResults.push({
-              fileName: File,
-              output: `Error: ${stderr}`,
-            });
-          } else {
-            compilationResults.push({
-              fileName: File,
-              output: `Output of ${File}:\n${stdout}`,
-            });
-          }
-        });
-      } else if (File.endsWith(".py")) {
-        execAsync(`python ${FilePath}`).then(({ stdout, stderr }) => {
-          if (stderr) {
-            compilationResults.push({
-              fileName: File,
-              output: `Error: ${stderr}`,
-            });
-          } else {
-            compilationResults.push({
-              fileName: File,
-              output: `Output of ${File}:\n${stdout}`,
-            });
-          }
-        });
-      } else {
-        const className = File.replace(".java", "");
-
-        try {
-          const { stdout, stderr } = await execAsync(`javac ${FilePath}`);
-
-          const result = {
-            fileName: File,
-            output: stderr
-              ? `Error: ${stderr}`
-              : `Successfully compiled ${File}`,
-          };
-
-          if (!stderr) {
-            const { stdout, stderr } = await execAsync(
-              `java -classpath ./${actualFilePath}/${actualFilePath} ${className}`
-            );
-
-            result.output += stderr
-              ? `\nError running ${className}: ${stderr}`
-              : `\nOutput of ${className}:\n${stdout}`;
-          }
-
-          compilationResults.push(result);
-        } catch (error) {
-          console.error(`Error processing ${File}: ${error.message}`);
-        }
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Files uploaded",
-      compilationResults,
+    await fs.writeFile(file.originalname, file.buffer);
+    extractAndProcessZip(file.originalname).then((results) => {
+      res.status(200).json({
+        success: true,
+        message: "Files uploaded",
+        results,
+      });
     });
 
-    await deleteUnzippedFiles(actualFilePath);
+    fs.rm(file.originalname, { force: true });
   } catch (error) {
     console.error({ error });
     return res.status(500).json({ error: error.message });
@@ -114,100 +35,20 @@ export const multiUpload = async (req, res) => {
         .status(400)
         .json({ success: false, error: "No files uploaded" });
     }
-
-    const results = [];
-
     for (const file of files) {
-      const zipFilePath = path.join(process.cwd(), file.originalname);
-      const unzipFolderPath = path.join(
-        process.cwd(),
-        file.originalname.replace(".zip", "")
-      );
-      const actualFilePath = file.originalname.replace(".zip", "");
-
-      await fs.writeFile(zipFilePath, file.buffer);
-
-      const zip = new AdmZip(zipFilePath);
-      zip.extractAllTo(unzipFolderPath, true);
-
-      const Files = await fs.readdir(
-        path.join(unzipFolderPath, actualFilePath)
-      );
-      const compilationResults = [];
-
-      for (const File of Files) {
-        const FilePath = path.join(actualFilePath, actualFilePath, File);
-        if (File.endsWith(".js")) {
-          execAsync(`node ${FilePath}`).then(({ stdout, stderr }) => {
-            if (stderr) {
-              compilationResults.push({
-                fileName: File,
-                output: `Error: ${stderr}`,
-              });
-            } else {
-              compilationResults.push({
-                fileName: File,
-                output: `Output of ${File}:\n${stdout}`,
-              });
-            }
-          });
-        } else if (File.endsWith(".py")) {
-          execAsync(`python ${FilePath}`).then(({ stdout, stderr }) => {
-            if (stderr) {
-              compilationResults.push({
-                fileName: File,
-                output: `Error: ${stderr}`,
-              });
-            } else {
-              compilationResults.push({
-                fileName: File,
-                output: `Output of ${File}:\n${stdout}`,
-              });
-            }
-          });
-        } else {
-          const className = File.replace(".java", "");
-
-          try {
-            const { stdout, stderr } = await execAsync(`javac ${FilePath}`);
-
-            const result = {
-              fileName: File,
-              output: stderr
-                ? `Error: ${stderr}`
-                : `Successfully compiled ${File}`,
-            };
-
-            if (!stderr) {
-              const { stdout, stderr } = await execAsync(
-                `java -classpath ./${actualFilePath}/${actualFilePath} ${className}`
-              );
-
-              result.output += stderr
-                ? `\nError running ${className}: ${stderr}`
-                : `\nOutput of ${className}:\n${stdout}`;
-            }
-
-            compilationResults.push(result);
-          } catch (error) {
-            console.error(`Error processing ${File}: ${error.message}`);
-          }
-        }
-      }
-
-      results.push({
-        fileName: file.originalname,
-        compilationResults,
-      });
-
-      await deleteUnzippedFiles(actualFilePath);
+      await fs.writeFile(file.originalname, file.buffer);
     }
-
+    const results = await Promise.all(
+      files.map((file) => extractAndProcessZip(file.originalname))
+    );
     res.status(200).json({
       success: true,
       message: "Files uploaded",
       results,
     });
+    await Promise.all(
+      files.map((file) => fs.rm(file.originalname, { force: true }))
+    );
   } catch (error) {
     console.error({ error });
     return res.status(500).json({ error: error.message });
