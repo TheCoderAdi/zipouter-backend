@@ -5,11 +5,11 @@ export const upload = async (req, res) => {
   try {
     const file = req.file;
 
-    if (!file) {
+    if (!file)
       return res
         .status(400)
         .json({ success: false, error: "No file uploaded" });
-    }
+
     await fs.writeFile(file.originalname, file.buffer);
     extractAndProcessZip(file.originalname).then((results) => {
       res.status(200).json({
@@ -30,14 +30,14 @@ export const multiUpload = async (req, res) => {
   try {
     const files = req.files;
 
-    if (!files || files.length === 0) {
+    if (!files || files.length === 0)
       return res
         .status(400)
         .json({ success: false, error: "No files uploaded" });
-    }
-    for (const file of files) {
+
+    for (const file of files)
       await fs.writeFile(file.originalname, file.buffer);
-    }
+
     const results = await Promise.all(
       files.map((file) => extractAndProcessZip(file.originalname))
     );
